@@ -1,0 +1,53 @@
+name: npm-publish
+
+# Publishes @openagentlock/skills to npm whenever a vN.N.N tag is pushed.
+# The tag's name is informational; npm sees package.json's "version".
+# Pre-flight: ensure package.json's version matches the tag, or bump it
+# in the same commit you tag from.
+#
+# Setup once:
+#   1. Generate a granular npm access token scoped to @openagentlock/*
+#      with publish permissions. Enable "bypass 2FA for automation".
+#   2. Add it as the repo secret NPM_TOKEN.
+#
+# Then:
+#   git tag v0.1.0 && git push --tags
+# CI runs npm publish with provenance.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write   # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify package.json version matches tag
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          # github.ref_name is the tag without refs/tags/. Strip leading v.
+          TAG_VERSION="${GIT_TAG#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: CLI smoke test
+        run: |
+          node bin/skills-cli.mjs list
+          node bin/skills-cli.mjs add --all --target /tmp/skills-smoke
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
